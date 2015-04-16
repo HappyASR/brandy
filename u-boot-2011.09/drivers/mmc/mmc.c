@@ -69,6 +69,11 @@ int __board_mmc_getcd(u8 *cd, struct mmc *mmc) {
 int board_mmc_getcd(u8 *cd, struct mmc *mmc)__attribute__((weak,
 	alias("__board_mmc_getcd")));
 
+int mmc_update_phase(struct mmc *mmc)
+{
+	return mmc->update_phase(mmc);
+}
+
 int mmc_send_cmd(struct mmc *mmc, struct mmc_cmd *cmd, struct mmc_data *data)
 {
 #ifdef CONFIG_MMC_TRACE
@@ -2178,6 +2183,13 @@ int mmc_do_switch(struct mmc *mmc, u8 set, u8 index, u8 value, u32 timeout)
 		MMCINFO("mmc switch failed\n");
 	}
 
+	ret = mmc_update_phase(mmc);
+	if (ret)
+	{
+		MMCINFO("update clock failed after send switch cmd\n");
+		return ret;
+	}
+
 	/* Waiting for the ready status */
 	mmc_send_status(mmc, timeout);
 
@@ -2229,6 +2241,13 @@ int mmc_change_freq(struct mmc *mmc)
 
 	if (err){
 		MMCINFO("mmc change to hs failed\n");
+		return err;
+	}
+
+	err = mmc_update_phase(mmc);
+	if (err)
+	{
+		MMCINFO("update clock failed\n");
 		return err;
 	}
 
@@ -2497,6 +2516,13 @@ retry_scr:
 		return err;
 	}
 
+	err = mmc_update_phase(mmc);
+	if (err)
+	{
+		MMCINFO("update clock failed\n");
+		return err;
+	}
+
 	if ((__be32_to_cpu(switch_status[4]) & 0x0f000000) == 0x01000000)
 		mmc->card_caps |= MMC_MODE_HS;
 
@@ -2539,10 +2565,7 @@ void mmc_set_ios(struct mmc *mmc)
 	mmc->set_ios(mmc);
 }
 
-int mmc_update_phase(struct mmc *mmc)
-{
-	return mmc->update_phase(mmc);
-}
+
 
 void mmc_set_clock(struct mmc *mmc, uint clock)
 {

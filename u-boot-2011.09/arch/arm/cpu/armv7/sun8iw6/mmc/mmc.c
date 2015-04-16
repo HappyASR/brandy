@@ -565,6 +565,10 @@ int mmc_send_ext_csd(struct mmc *mmc, char *ext_csd)
 	return err;
 }
 
+int mmc_update_phase(struct mmc *mmc)
+{
+	return mmc->update_phase(mmc);
+}
 
 int mmc_switch(struct mmc *mmc, u8 set, u8 index, u8 value)
 {
@@ -584,6 +588,12 @@ int mmc_switch(struct mmc *mmc, u8 set, u8 index, u8 value)
 		mmcinfo("mmc %d switch failed\n",mmc->control_num);
 	}
 
+	/* for re-update sample phase */
+	ret = mmc_update_phase(mmc);
+	if (ret) {
+		mmcinfo("mmc_switch: update clock failed after send cmd6\n");
+		return ret;
+	}
 
 	/* Waiting for the ready status */
 	mmc_send_status(mmc, timeout);
@@ -797,6 +807,12 @@ retry_scr:
 		return err;
 	}
 
+	err = mmc_update_phase(mmc);
+	if (err) {
+		mmcinfo("update clock failed after send cmd6 to switch to sd high speed mode\n");
+		return err;
+	}
+
 	if ((__be32_to_cpu(switch_status[4]) & 0x0f000000) == 0x01000000)
 		mmc->card_caps |= MMC_MODE_HS;
 
@@ -837,11 +853,6 @@ static const int multipliers[] = {
 void mmc_set_ios(struct mmc *mmc)
 {
 	mmc->set_ios(mmc);
-}
-
-int mmc_update_phase(struct mmc *mmc)
-{
-	return mmc->update_phase(mmc);
 }
 
 void mmc_set_clock(struct mmc *mmc, uint clock)
