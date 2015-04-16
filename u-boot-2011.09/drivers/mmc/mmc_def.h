@@ -14,7 +14,7 @@
 #endif
 
 
-#define DRIVER_VER  "2014-12-10 9:23:00"
+#define DRIVER_VER  "2015-03-23 17:07:00"
 
 //#define TUNING_LEN		(1)//The address which store the tuninng pattern
 //#define TUNING_ADD		(38192-TUNING_LEN)//The address which store the tuninng pattern

@@ -148,6 +148,7 @@ struct bias_set
 	int  index;
 };
 
+extern int plat_get_chip_id(void);
 int power_config_gpio_bias(void)
 {
 	char gpio_bias[32], gpio_name[32];
@@ -163,7 +164,18 @@ int power_config_gpio_bias(void)
 	struct bias_set bias_vol_config[8] =
 		{ {1800, 0}, {2500, 6}, {2800, 9}, {3000, 0xa}, {3300, 0xd}, {0, 0} };
 
-	main_hd = script_parser_fetch_subkey_start("gpio_bias");
+	int  chipid;
+
+	chipid = plat_get_chip_id();
+	//0x18:axp_818, 0x13:axp_813 0x03:axp_803 0x0: key not burn
+	if(chipid == 0x03)
+	{
+		main_hd = script_parser_fetch_subkey_start("gpio_bias_ext");
+	}
+	else
+	{
+		main_hd = script_parser_fetch_subkey_start("gpio_bias");
+	}
 
 	index = 0;
 	while(1)
@@ -380,6 +392,69 @@ __END:
     return ;
 }
 
+extern int plat_get_chip_id(void);
+void update_cfg_for_audio_and_tv(void)
+{
+	int chipid;
+	int tv_ac200_used = 0, tv_ac100_used = 0;
+	int err_flag = 0;
+
+	chipid = plat_get_chip_id();
+
+	//0x18:axp_818, 0x13:axp_813 0x03:axp_803 0x0: key not burn
+	if(chipid == -1)  //default, platform not implement function plat_get_chip_id
+	{
+		printf("axp chipid not care,use default cfg\n");
+		return ;
+	}
+	else if(chipid == 0x03)  //ac200
+	{
+		tv_ac200_used = 1, tv_ac100_used = 0;
+		printf("detect ac200\n");
+	}
+	else //ac100
+	{
+		printf("detect ac100\n");
+		tv_ac200_used = 0, tv_ac100_used = 1;
+	}
+
+	if(script_parser_patch("tv_ac200_para","tv_used",(&tv_ac200_used),sizeof(int)/4))
+	{
+		printf("update  [tv_ac200_para] cfg error\n");
+		err_flag ++;
+	}
+	if(script_parser_patch("tv_gm7121_para","tv_used",(&tv_ac100_used),sizeof(int)/4))
+	{
+		printf("update [tv_ac100_para] cfg error\n");
+		err_flag ++;
+	}
+	if(script_parser_patch("s_twi0","s_twi_used",(&tv_ac200_used),sizeof(int)/4))
+	{
+		printf("update s_twi_used cfg error\n");
+		err_flag ++;
+	}
+	if(script_parser_patch("s_twi0","twi_used",(&tv_ac200_used),sizeof(int)/4))
+	{
+		printf("update twi_used cfg error\n");
+		err_flag ++;
+	}
+	if(script_parser_patch("acx0","ac100_used",(&tv_ac100_used),sizeof(int)/4))
+	{
+		printf("update ac100_used cfg error\n");
+		err_flag ++;
+	}
+	if(script_parser_patch("acx0","ac200_used",(&tv_ac200_used),sizeof(int)/4))
+	{
+		printf("update ac200_used cfg error\n");
+		err_flag ++;
+	}
+
+	if(!err_flag)
+	{
+		printf("update tv/audio cfg sucess\n");
+	}
+
+}
 
 int power_source_init(void)
 {
@@ -441,6 +516,7 @@ int power_source_init(void)
 	power_limit_init();
     // AXP and RTC use the same interrupt line, so disable RTC INT in uboot
     disable_rtc_int();
+    update_cfg_for_audio_and_tv();
 
 	return 0;
 }

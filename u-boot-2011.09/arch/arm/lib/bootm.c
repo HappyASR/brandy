@@ -173,6 +173,9 @@ int do_bootm_linux(int flag, int argc, char *argv[], bootm_headers_t *images)
 	return 1;
 }
 
+
+extern int plat_get_chip_id(void);
+
 /* Boot android style linux kernel and ramdisk */
 int do_boota_linux (struct fastboot_boot_img_hdr *hdr)
 {
@@ -222,6 +225,10 @@ int do_boota_linux (struct fastboot_boot_img_hdr *hdr)
 			strcat((char *)hdr->cmdline, data);
 		}
 
+                strcat((char *)hdr->cmdline, " fb_base=");
+                sprintf(data , "0x%x", (uint)gd->fb_base);
+                strcat((char *)hdr->cmdline, data);
+
 		if(sig != NULL)
 		{
 			strcat((char *)hdr->cmdline, " signature=");
@@ -239,6 +246,10 @@ int do_boota_linux (struct fastboot_boot_img_hdr *hdr)
 
 		strcat((char *)hdr->cmdline, " partitions=");
         strcat((char *)hdr->cmdline, s);
+
+	strcat((char *)hdr->cmdline, " axp_chipid=");
+	sprintf(data, "%d", plat_get_chip_id());
+	strcat((char *)hdr->cmdline, data);
 
 		setup_commandline_tag (bd, (char *)hdr->cmdline);
 	} else {
@@ -262,6 +273,10 @@ int do_boota_linux (struct fastboot_boot_img_hdr *hdr)
 			strcat(cmdline, data);
 		}
 
+                strcat((char *)cmdline, " fb_base=");
+                sprintf(data , "0x%x", (uint)gd->fb_base);
+                strcat((char *)cmdline, data);
+
 		if(gd->chargemode == 1)
 		{
 		    strcat(cmdline," androidboot.mode=");
@@ -276,6 +291,10 @@ int do_boota_linux (struct fastboot_boot_img_hdr *hdr)
 		{	strcat(cmdline, " signature=");
 			strcat(cmdline, sig);
         }
+
+	strcat((char *)cmdline, " axp_chipid=");
+	sprintf(data, "%d", plat_get_chip_id());
+	strcat(cmdline, data);
 
 	//	strcat(cmdline, " partitions=");
         //strcat(cmdline, s);

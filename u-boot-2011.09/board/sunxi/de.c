@@ -30,12 +30,14 @@
 #else
 #endif
 #include <sys_config.h>
+#include <bmp_layout.h>
 
 DECLARE_GLOBAL_DATA_PTR;
 
 #ifdef CONFIG_SUNXI_DISPLAY
 static __u32 screen_id = 0;
 static __u32 disp_para = 0;
+static __u32 init_disp = 0;
 
 int get_display_resolution(int display_type);
 
@@ -632,6 +634,7 @@ int board_display_framebuffer_set(int width, int height, int bitcount, void *buf
 	memset((void *)layer_para, 0, sizeof(disp_layer_config));
 	layer_para->info.fb.addr[0]		= (uint)buffer;
 	tick_printf("frame buffer address %x\n", (uint)buffer);
+        gd->fb_base = (uint)buffer - sizeof(bmp_header_t);
 	layer_para->channel = 1;
 	layer_para->layer_id = 0;
 	layer_para->info.fb.format		= (bitcount == 24)? DISP_FORMAT_RGB_888:DISP_FORMAT_ARGB_8888;
@@ -687,6 +690,7 @@ int board_display_framebuffer_set(int width, int height, int bitcount, void *buf
 	memset((void *)layer_para, 0, sizeof(disp_layer_info));
 	layer_para->fb.addr[0]		= (uint)buffer;
 	debug("frame buffer address %x\n", (uint)buffer);
+	gd->fb_base = (uint)buffer - sizeof(bmp_header_t);
 	layer_para->fb.format		= (bitcount == 24)? DISP_FORMAT_RGB_888:DISP_FORMAT_ARGB_8888;
 	layer_para->fb.size.width	= width;
 	layer_para->fb.size.height	= height;
@@ -1044,7 +1048,13 @@ int board_display_device_open(void)
 #endif
 	tick_printf("finally, output_type=0x%x, output_mode=0x%x, screen_id=0x%x, disp_para=0x%x\n",
 		output_type, output_mode, screen_id, disp_para);
-
+	output_mode = get_display_resolution(DISP_OUTPUT_TYPE_HDMI);
+	if(output_mode) {
+		init_disp |= (((DISP_OUTPUT_TYPE_HDMI & 0xff) << 8) | (output_mode & 0xff)) << (hdmi_channel << 4);
+	}
+	if(cvbs_used && (output_mode = get_display_resolution(DISP_OUTPUT_TYPE_TV))) {
+		init_disp |= (((DISP_OUTPUT_TYPE_TV & 0xff) << 8) | (output_mode & 0xff)) << (cvbs_channel << 4);
+	}
 	return ret;
 }
 
@@ -1341,9 +1351,9 @@ int board_display_setenv(char *data)
 		return -1;
 
 #if ((defined CONFIG_ARCH_HOMELET) && (defined CONFIG_ARCH_SUN9IW1P1))
-	sprintf(data, " disp_rsl=%x", disp_para);
+	sprintf(data, " disp_rsl=%x init_disp=%x", disp_para, init_disp);
 #else
-	sprintf(data, " disp_para=%x", disp_para);
+	sprintf(data, " disp_para=%x init_disp=%x", disp_para, init_disp);
 #endif
 	printf("board_display_setenv: %s\n", data);
 	return 0;

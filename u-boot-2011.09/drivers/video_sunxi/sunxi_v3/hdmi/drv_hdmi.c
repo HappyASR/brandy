@@ -305,10 +305,11 @@ __s32 Hdmi_init(void)
 			}
 			disp_sys_clk_enable("hdmi");
 
-			Hdmi_set_reg_base(HDMI_BASE);
-			Hdmi_hal_init();
 			hdmi_parse_io_config();
 			hdmi_io_config(1);
+
+			Hdmi_set_reg_base(HDMI_BASE);
+			Hdmi_hal_init();
 
 			disp_func.hdmi_open = Hdmi_open;
 			disp_func.hdmi_close = Hdmi_close;

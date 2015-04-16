@@ -61,6 +61,11 @@ int mmc_set_blocklen(struct mmc *mmc, int len)
 {
 	struct mmc_cmd cmd;
 
+	/*ddr mode not send blocklenth*/
+	if(mmc->io_mode){
+		return 0;
+	}
+
 	cmd.cmdidx = MMC_CMD_SET_BLOCKLEN;
 	cmd.resp_type = MMC_RSP_R1;
 	cmd.cmdarg = len;
@@ -602,8 +607,8 @@ int mmc_change_freq(struct mmc *mmc)
 	/* Only version 4 supports high-speed */
 	if (mmc->version < MMC_VERSION_4)
 		return 0;
-
-	mmc->card_caps |= MMC_MODE_4BIT;
+	//here we assume eMMC support 8 bit
+	mmc->card_caps |= MMC_MODE_4BIT|MMC_MODE_8BIT;
 
 	err = mmc_send_ext_csd(mmc, ext_csd);
 
@@ -646,6 +651,13 @@ int mmc_change_freq(struct mmc *mmc)
 		mmc->card_caps |= MMC_MODE_HS_52MHz | MMC_MODE_HS;
 	else
 		mmc->card_caps |= MMC_MODE_HS;
+
+	if (cardtype & MMC_DDR_52MHZ){
+		mmc->card_caps |= MMC_MODE_DDR_52MHz;
+		mmcdbg("get ddr OK!\n");
+	}else{
+		mmcinfo("get ddr fail!\n");
+	}
 
 	return 0;
 }
@@ -827,7 +839,12 @@ void mmc_set_ios(struct mmc *mmc)
 	mmc->set_ios(mmc);
 }
 
-void mmc_set_clock(struct mmc *mmc, u32 clock)
+int mmc_update_phase(struct mmc *mmc)
+{
+	return mmc->update_phase(mmc);
+}
+
+void mmc_set_clock(struct mmc *mmc, uint clock)
 {
 	if (clock > mmc->f_max)
 		clock = mmc->f_max;
@@ -837,6 +854,12 @@ void mmc_set_clock(struct mmc *mmc, u32 clock)
 
 	mmc->clock = clock;
 
+	mmc_set_ios(mmc);
+}
+
+void mmc_set_bus_mode(struct mmc *mmc, u32 ddr)
+{
+	mmc->io_mode= ddr;
 	mmc_set_ios(mmc);
 }
 
@@ -1075,7 +1098,15 @@ int mmc_startup(struct mmc *mmc)
 		mmcinfo("mmc %d Change speed mode failed\n",mmc->control_num);
 		return err;
 	}
-
+	
+	/* for re-update sample phase */
+	err = mmc_update_phase(mmc);
+	if (err)
+	{
+		mmcinfo("update clock failed\n");
+		return err;
+	}
+	
 	/* Restrict card's capabilities by what the host can do */
 	mmc->card_caps &= mmc->host_caps;
 
@@ -1109,34 +1140,63 @@ int mmc_startup(struct mmc *mmc)
 			mmc_set_clock(mmc, 50000000);
 		else
 			mmc_set_clock(mmc, 25000000);
-	} else {
-		if (mmc->card_caps & MMC_MODE_4BIT) {
-			/* Set the card to use 4 bit*/
-			err = mmc_switch(mmc, EXT_CSD_CMD_SET_NORMAL,
-					EXT_CSD_BUS_WIDTH,
-					EXT_CSD_BUS_WIDTH_4);
-
-			if (err){
-				mmcinfo("mmc %d switch bus width failed\n",mmc->control_num);
-				return err;
+		} else {
+			if (mmc->card_caps & MMC_MODE_8BIT) {		
+				if( (mmc->card_caps & MMC_MODE_DDR_52MHz) ){
+					mmcinfo("8bit ddr!!! \n");
+					/* Set the card to use 8 bit ddr*/
+					err = mmc_switch(mmc, EXT_CSD_CMD_SET_NORMAL,
+							EXT_CSD_BUS_WIDTH,
+							EXT_CSD_BUS_DDR_8);
+					if (err){
+						mmcinfo("mmc switch bus width failed\n");
+						return err;
+					}
+					mmc_set_bus_mode(mmc,1);
+					mmc_set_bus_width(mmc, 8);
+				}else{
+					/* Set the card to use 8 bit*/
+					err = mmc_switch(mmc, EXT_CSD_CMD_SET_NORMAL,
+							EXT_CSD_BUS_WIDTH,
+							EXT_CSD_BUS_WIDTH_8);
+		
+					if (err){
+						mmcinfo("mmc switch bus width8 failed\n");
+						return err;
+					}
+					mmc_set_bus_width(mmc, 8);
+				}
+		
+			}else if (mmc->card_caps & MMC_MODE_4BIT) {
+				if ( (mmc->card_caps & MMC_MODE_DDR_52MHz) ){
+					mmcinfo("4bit bus ddr!!! \n");
+					/* Set the card to use 4 bit ddr*/
+					err = mmc_switch(mmc, EXT_CSD_CMD_SET_NORMAL,
+							EXT_CSD_BUS_WIDTH,
+							EXT_CSD_BUS_DDR_4);
+					if (err){
+						mmcinfo("mmc switch bus width failed\n");
+						return err;
+					}
+					mmc_set_bus_mode(mmc,1);
+					mmc_set_bus_width(mmc, 4);
+				}else{
+					/* Set the card to use 4 bit*/
+					err = mmc_switch(mmc, EXT_CSD_CMD_SET_NORMAL,
+							EXT_CSD_BUS_WIDTH,
+							EXT_CSD_BUS_WIDTH_4);
+					if (err){
+						mmcinfo("mmc switch bus width failed\n");
+						return err;
+					}
+					mmc_set_bus_width(mmc, 4);
+				}
 			}
 
-			mmc_set_bus_width(mmc, 4);
-		} else if (mmc->card_caps & MMC_MODE_8BIT) {
-			/* Set the card to use 8 bit*/
-			err = mmc_switch(mmc, EXT_CSD_CMD_SET_NORMAL,
-					EXT_CSD_BUS_WIDTH,
-					EXT_CSD_BUS_WIDTH_8);
 
-			if (err){
-				mmcinfo("mmc %d switch bus width8 failed\n",mmc->control_num);
-				return err;
-			}
-
-			mmc_set_bus_width(mmc, 8);
-		}
-
-		if (mmc->card_caps & MMC_MODE_HS) {
+		if( mmc->card_caps & MMC_MODE_DDR_52MHz ){
+			mmc_set_clock(mmc, 52000000);
+		}else if (mmc->card_caps & MMC_MODE_HS) {
 			if (mmc->card_caps & MMC_MODE_HS_52MHz)
 				mmc_set_clock(mmc, 52000000);
 			else
@@ -1191,7 +1251,7 @@ int mmc_startup(struct mmc *mmc)
 		}
 	}
 	mmcinfo("SD/MMC Card: %dbit, capacity: %dMB\n",
-					mmc->card_caps & MMC_MODE_4BIT ? 4 : 1, mmc->lba >> 11);
+					mmc->card_caps & MMC_MODE_8BIT? 8:(mmc->card_caps & MMC_MODE_4BIT ? 4 : 1), mmc->lba >> 11);
 	mmcinfo("vendor: Man %x Snr %x\n", (mmc->cid[0] >> 8) & 0xffffff,
 					(mmc->cid[2] << 8) | (mmc->cid[3] >> 24));
 	mmcinfo("product: %c%c%c%c%c\n", mmc->cid[0] & 0xff,

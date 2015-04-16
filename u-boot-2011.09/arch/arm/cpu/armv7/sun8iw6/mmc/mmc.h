@@ -29,6 +29,7 @@
 #define MMC_VERSION_5_0		(MMC_VERSION_MMC | 0x50)
 
 #define MMC_MODE_HS		0x001
+#define MMC_MODE_DDR_52MHz 0x002
 #define MMC_MODE_HS_52MHz	0x010
 #define MMC_MODE_4BIT		0x100
 #define MMC_MODE_8BIT		0x200
@@ -87,6 +88,8 @@
 
 #define MMC_HS_TIMING		0x00000100
 #define MMC_HS_52MHZ		0x2
+#define MMC_DDR_52MHZ       0x4
+
 
 #define OCR_BUSY		0x80000000
 #define OCR_HCS			0x40000000
@@ -155,6 +158,9 @@
 #define EXT_CSD_BUS_WIDTH_1	0	/* Card is in 1 bit mode */
 #define EXT_CSD_BUS_WIDTH_4	1	/* Card is in 4 bit mode */
 #define EXT_CSD_BUS_WIDTH_8	2	/* Card is in 8 bit mode */
+#define EXT_CSD_BUS_DDR_4	5	/* Card is in 4 bit ddr mode */
+#define EXT_CSD_BUS_DDR_8	6	/* Card is in 8 bit ddr mode */
+
 
 #define R1_ILLEGAL_COMMAND		(1 << 22)
 #define R1_APP_CMD			(1 << 5)
@@ -179,6 +185,15 @@
 #define MMCPART_NOAVAILABLE	(0xff)
 #define PART_ACCESS_MASK	(0x7)
 #define PART_SUPPORT		(0x1)
+
+
+
+/*MMC HOST FUNC*/
+#define MMC_HOST_2XMODE_FUNC                      (0x1 << 0)
+//#define MMC_NO_FUNC                               (0)
+
+
+
 
 struct mmc_cid {
 	unsigned long psn;
@@ -253,6 +268,9 @@ struct mmc {
 	int high_capacity;
 	unsigned bus_width;
 	unsigned clock;
+
+	uint io_mode;
+	
 	unsigned card_caps;
 	unsigned host_caps;
 	unsigned ocr;
@@ -271,6 +289,14 @@ struct mmc {
 			struct mmc_cmd *cmd, struct mmc_data *data);
 	void (*set_ios)(struct mmc *mmc);
 	int (*init)(struct mmc *mmc);
+	int (*update_phase)(struct mmc *mmc);
+
+	/*
+		add these members to impliment sample point auto-adaption
+	*/
+	int (*decide_retry)(struct mmc *mmc,int err_no ,uint reset_count);
+	int (*update_sdly)(struct mmc *mmc,uint sdly);
+	int (*get_detail_errno)(struct mmc *mmc);
 	struct tuning_sdly sdly_tuning;
 	unsigned b_max;
     unsigned lba;        /* number of blocks */

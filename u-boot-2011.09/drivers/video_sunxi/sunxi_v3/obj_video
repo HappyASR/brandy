@@ -36,6 +36,9 @@ SUNXI_VIDEO_OBJ = sunxi_v3/dev_disp.o sunxi_v3/disp_sys_intf.o\
 				sunxi_v3/hdmi/aw/hdmi_core.o sunxi_v3/hdmi/aw/hdmi_edid.o sunxi_v3/hdmi/aw/hdmi_interface.o sunxi_v3/hdmi/drv_hdmi.o\
 				sunxi_v3/hdmi/aw/hdmi_hal.o sunxi_v3/hdmi/aw/hdmi_bsp_sun8iw6.o\
 				sunxi_v3/tv/gm7121.o
+ifeq ($(CONFIG_USE_AC200),y)
+SUNXI_VIDEO_OBJ += sunxi_v3/tv/tv_ac200.o sunxi_v3/tv/tv_ac200_lowlevel.o
+endif
 endif
 
 ifeq ($(CONFIG_ARCH_SUN8IW7P1),y)

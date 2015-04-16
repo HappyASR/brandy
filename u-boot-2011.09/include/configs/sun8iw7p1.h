@@ -51,6 +51,7 @@
 #define CONFIG_ARCH_HOMELET
 
 #define CONFIG_VIDEO_SUNXI_V3
+#define CONFIG_SUNXI_CHIPID 
 
 #define CONFIG_CPUS_STANDBY
 #define USE_AW_FAT
@@ -87,7 +88,7 @@
  * Size of malloc() pool
  * 1MB = 0x100000, 0x100000 = 1024 * 1024
  */
-#define CONFIG_SYS_MALLOC_LEN		(CONFIG_ENV_SIZE + (192 << 20))
+#define CONFIG_SYS_MALLOC_LEN		(CONFIG_ENV_SIZE + (128 << 20))
 
 
 

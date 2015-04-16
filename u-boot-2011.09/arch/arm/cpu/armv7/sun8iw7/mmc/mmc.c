@@ -839,7 +839,12 @@ void mmc_set_ios(struct mmc *mmc)
 	mmc->set_ios(mmc);
 }
 
-void mmc_set_clock(struct mmc *mmc, u32 clock)
+int mmc_update_phase(struct mmc *mmc)
+{
+	return mmc->update_phase(mmc);
+}
+
+void mmc_set_clock(struct mmc *mmc, uint clock)
 {
 	if (clock > mmc->f_max)
 		clock = mmc->f_max;
@@ -1093,7 +1098,15 @@ int mmc_startup(struct mmc *mmc)
 		mmcinfo("mmc %d Change speed mode failed\n",mmc->control_num);
 		return err;
 	}
-
+	
+	/* for re-update sample phase */
+	err = mmc_update_phase(mmc);
+	if (err)
+	{
+		mmcinfo("update clock failed\n");
+		return err;
+	}
+	
 	/* Restrict card's capabilities by what the host can do */
 	mmc->card_caps &= mmc->host_caps;
 

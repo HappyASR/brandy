@@ -83,7 +83,7 @@
  * Size of malloc() pool
  * 1MB = 0x100000, 0x100000 = 1024 * 1024
  */
-#define CONFIG_SYS_MALLOC_LEN		(CONFIG_ENV_SIZE + (192 << 20))
+#define CONFIG_SYS_MALLOC_LEN		(CONFIG_ENV_SIZE + (128 << 20))
 
 
 
@@ -190,13 +190,15 @@
 #define CONFIG_SUNXI_AXP
 #if defined(CONFIG_ARCH_HOMELET)
 	#define CONFIG_SUNXI_I2C		//cvbs used twi1(i2c)
+	#define CONFIG_CPUS_I2C
 	#define CONFIG_SYS_I2C_SPEED 400000
-	#define CONFIG_SYS_I2C_SLAVE 0x68
+	#define CONFIG_SYS_I2C_SLAVE 0x10
 
 	#define CONFIG_CPUS_STANDBY		//cpus standby for box
 
 	#define USE_AW_FAT
 
+	#define CONFIG_USE_AC200
 	#define CVBS_MODE_USED_GM7121 //gm7121 driver, the cvbs control
 #endif
 #define POWER_CONFIG_SUNXI_RSB	//axp communication bus

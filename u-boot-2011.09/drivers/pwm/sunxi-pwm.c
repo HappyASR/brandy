@@ -217,6 +217,15 @@ int sunxi_pwm_config(int pwm, int duty_ns, int period_ns)
     uint entire_cycles_max = 65536;
     uint temp;
 
+	if(period_ns < 42) {
+		/* if freq lt 24M, then direct output 24M clock */
+
+		temp = sunxi_pwm_read_reg(pwm);
+		temp |= (0x1 << 9);//pwm bypass
+		sunxi_pwm_write_reg(pwm, temp);
+
+		return 0;
+	}
     if(period_ns < 10667)
         freq = 93747;
     else if(period_ns > 1000000000)

@@ -34,9 +34,17 @@ extern int sunxi_flash_mmc_secwrite( int item, unsigned char *buf, unsigned int 
 extern int sunxi_sprite_mmc_secwrite(int item ,unsigned char *buf,unsigned int nblock);
 extern int sunxi_sprite_mmc_secread(int item ,unsigned char *buf,unsigned int nblock);
 
+int sunxi_secure_storage_erase(const char *item_name);
 
 static unsigned char secure_storage_map[4096] = {0};
 static unsigned int  secure_storage_inited = 0;
+
+static unsigned int map_dirty;
+
+static inline void set_map_dirty(void)   { map_dirty = 1; }
+static inline void clear_map_dirty(void) { map_dirty = 0;}
+static inline int try_map_dirty(void)    { return map_dirty ;}
+
 /*
 ************************************************************************************************************
 *
@@ -154,11 +162,11 @@ static int __probe_name_in_map(unsigned char *buffer, const char *item_name, int
 			i ++;j++;
 		}
 
-		printf("name in map %s\n", name);
 		if(!strcmp(item_name, (const char *)name))
 		{
 			buf_start += strlen(item_name) + 1;
 			*len = simple_strtoul((const char *)length, NULL, 10);
+			printf("name in map %s\n", name);
 			return index;
 		}
 		index ++;
@@ -191,13 +199,13 @@ static int __fill_name_in_map(unsigned char *buffer, const char *item_name, int 
 
 	while(*buf_start != '\0')
 	{
-		printf("name in map %s\n", buf_start);
 
 		name_len = 0;
 		while(buf_start[name_len] != ':')
 			name_len ++;
 		if(!memcmp((const char *)buf_start, item_name, name_len))
 		{
+			printf("name in map %s\n", buf_start);
 			return index;
 		}
 		index ++;
@@ -234,14 +242,13 @@ static int __discard_name_in_map(unsigned char *buffer, const char *item_name)
 
 	while(*buf_start != '\0')
 	{
-		printf("name in map %s\n", buf_start);
 
 		name_len = 0;
 		while(buf_start[name_len] != ':')
 			name_len ++;
 		if(!memcmp((const char *)buf_start, item_name, name_len))
 		{
-			last_start = buffer + strlen((const char *)buf_start) + 1;
+			last_start = buf_start + strlen((const char *)buf_start) + 1;
 			if(*last_start == '\0')
 			{
 				memset(buf_start, 0, strlen((const char *)buf_start));
@@ -327,12 +334,15 @@ int sunxi_secure_storage_exit(void)
 
 		return -1;
 	}
-	ret = sunxi_secstorage_write(0, secure_storage_map, 4096);
-	if(ret<0)
-	{
-		printf("write secure storage map\n");
+	if( try_map_dirty() ){
+		ret = sunxi_secstorage_write(0, secure_storage_map, 4096);
+		if(ret<0)
+		{
+			printf("write secure storage map\n");
 
-		return -1;
+			return -1;
+		}
+		clear_map_dirty();
 	}
 	secure_storage_inited = 0;
 
@@ -534,6 +544,15 @@ int sunxi_secure_storage_write(const char *item_name, char *buffer, int length)
 
 		return -1;
 	}
+	
+	if( sunxi_secure_storage_probe(item_name) ==0 ){
+		printf("There is the same name in the secure storage, try to erase it\n");
+		if( sunxi_secure_storage_erase( item_name ) <0 ){
+			printf("Erase item %s fail\n",item_name);
+			return -1; 
+		}
+	}
+
 	index = __fill_name_in_map(secure_storage_map, item_name, length);
 	if(index < 0)
 	{
@@ -550,6 +569,7 @@ int sunxi_secure_storage_write(const char *item_name, char *buffer, int length)
 
 		return -1;
 	}
+	set_map_dirty();
 	printf("write secure storage: %d ok\n", index);
 
 	return 0;
@@ -598,6 +618,7 @@ int sunxi_secure_storage_erase(const char *item_name)
 
 		return -1;
 	}
+	set_map_dirty();
 	printf("erase secure storage: %d ok\n", index);
 
 	return 0;

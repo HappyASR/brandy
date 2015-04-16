@@ -720,7 +720,7 @@ void board_init_r(gd_t *id, ulong dest_addr)
 			}
 			else
 			{
-				ret0 = sunxi_secure_storage_read("hdcpkey", buffer, 4096, &data_len);
+				ret0 = sunxi_secure_object_read("hdcpkey", buffer, 4096, &data_len);
 				if(ret0)
 				{
 					printf("probe hdcp key failed\n");

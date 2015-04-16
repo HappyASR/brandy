@@ -31,8 +31,11 @@
 #include <smc.h>
 #include <securestorage.h>
 #include "key_deal.h"
-
-
+#ifdef CONFIG_SUNXI_SECURE_SYSTEM
+#include <sunxi_efuse.h>
+#include <asm/arch/efuse.h>
+DECLARE_GLOBAL_DATA_PTR;
+#endif
 int smc_set_sst_crypt_name(char *name);
 
 static  int sunxi_usb_pburn_write_enable = 0;
@@ -45,9 +48,15 @@ static  pburn_trans_set_t  trans_data;
 #ifdef  CONFIG_SUNXI_SECURE_STORAGE
 static  u8 *private_data_ext_buff_step, *private_data_ext_buff;
 #endif
+
+static int burn_part_result_state=ERR_NO_SUCCESS; 
+
+long long burn_part_bytes = 0;
+
 extern volatile int sunxi_usb_burn_from_boot_handshake;
 extern volatile int sunxi_usb_burn_from_boot_setup;
 static uint burn_private_start, burn_private_len;
+static uint burn_part_start, burn_part_len;
 /*
 *******************************************************************************
 *                     do_usb_req_set_interface
@@ -473,11 +482,21 @@ int __sunxi_burn_key(u8 *buff, uint buff_len)
 			strcpy(efuse_key_info.name, (const char *)key_list->name);
 			efuse_key_info.len = key_list->len;
 			efuse_key_info.key_data = (u8 *)key_list->key_data;
-
-			if(smc_efuse_writel(&efuse_key_info))
-			{
-				return -1;
-			}
+			if(gd->securemode == SUNXI_NORMAL_MODE)
+                        {
+                                if(smc_efuse_writel(&efuse_key_info))
+			        {
+				        return -1;
+			        }
+			
+                        }
+                        else if(gd->securemode == SUNXI_SECURE_MODE)
+                        {
+                                if(sunxi_efuse_write(&efuse_key_info))
+                                {
+                                        return -1;
+                                }
+                        }
 		}
 		else
 #endif
@@ -498,8 +517,10 @@ int __sunxi_burn_key(u8 *buff, uint buff_len)
 			else
 #endif
 			{
-				if(key_list->if_crypt)
-					smc_set_sst_crypt_name(key_list->name);
+				sunxi_secure_object_set(key_list->name,
+										key_list->if_crypt,
+										key_list->if_replace,
+										0,0,0 ); /*set secure storage feature*/
 
 				if(sunxi_secure_object_write(key_list->name, (char *)key_list->key_data, key_list->len))
 				{
@@ -518,6 +539,105 @@ int __sunxi_burn_key(u8 *buff, uint buff_len)
 	return 0;
 }
 #endif
+
+/*
+************************************************************************************************************
+*
+*                                             function
+*
+*    name          :
+*
+*    parmeters     :
+*
+*    return        :
+*
+*    note          :
+*
+*
+************************************************************************************************************
+*/
+int sunxi_burn_part_verify(void *veryfy_info, long long burn_bytes)
+{
+	long long base_bytes = 0;
+	uint active_verify = 0;
+	uint origin_verify = 0;
+	uint part_start;
+	pburn_verify_part_set_t *temp_info = NULL;
+
+	temp_info = (pburn_verify_part_set_t *)veryfy_info;
+
+	part_start = sunxi_partition_get_offset_byname(temp_info->name);
+	if(!part_start)
+	{
+		printf("partition %s is not exist\n", temp_info->name);
+		return -1;
+	}
+
+	base_bytes = burn_bytes;
+	origin_verify = temp_info->check_sum;
+	active_verify = sunxi_sprite_part_rawdata_verify(part_start, base_bytes);
+	printf("origin checksum=%x, active checksum=%x\n", origin_verify, active_verify);
+	if(active_verify != origin_verify)
+	{
+	    printf("sunxi burn: part %s verify error\n", temp_info->name);
+		return -1;
+	}
+	return 0;
+}
+
+/*
+************************************************************************************************************
+*
+*                                             function
+*
+*    name          :
+*
+*    parmeters     :
+*
+*    return        :
+*
+*    note          :
+*
+*
+************************************************************************************************************
+*/
+int burn_part_probe(void *burn_part_info)
+{
+	pburn_partition_set_t *part_info = NULL;
+	int burn_state = 0;
+
+	part_info = (pburn_partition_set_t *)(burn_part_info);
+	if(!strcmp(part_info->magic, "usbburnpart"))
+	{
+		burn_part_start = sunxi_partition_get_offset_byname(part_info->name);
+		burn_part_len   = sunxi_partition_get_size_byname(part_info->name);
+		if(!burn_part_start)
+		{
+			printf("partition %s is not exist\n", part_info->name);
+			burn_state = ERR_NO_PART_NOEXIST;
+		}
+		else if(((!burn_part_len) || (burn_part_len < ((part_info->lenlo + 511))/512)) || (part_info->lenlo == 0))
+		{
+			printf("the burn data size 0x%x is large then 0x%x\n", part_info->lenlo, burn_part_len);
+			burn_state = ERR_NO_PART_SIZE_ERR;
+		}
+		else
+		{
+			printf("part info check success\n");
+			printf("part_info->lenhi=%d\n", part_info->lenhi);
+			printf("part_info->lenlo=%d\n", part_info->lenlo);
+			burn_part_bytes = part_info->lenhi;
+			burn_part_bytes = (burn_part_bytes << 32) + part_info->lenlo;
+			burn_state = ERR_NO_SUCCESS;
+		}
+	}
+	else
+	{
+		printf("part magic %s need equal usbburnpart\n", part_info->magic);
+		burn_state = ERR_NO_PART_MAGIC_ERR;
+	}
+	return burn_state;
+}
 /*
 ************************************************************************************************************
 *
@@ -798,13 +918,14 @@ static int sunxi_pburn_state_loop(void  *buffer)
 	static struct umass_bbb_cbw_t  *cbw;
 	static struct umass_bbb_csw_t  csw;
 	static uint pburn_flash_start = 0;
-	//static uint pburn_flash_sectors = 0;
+	static uint pburn_flash_sectors = 0;
 	int    ret;
-	sunxi_ubuf_t *sunxi_ubuf = (sunxi_ubuf_t *)buffer;
 
+	sunxi_ubuf_t *sunxi_ubuf = (sunxi_ubuf_t *)buffer;
 	switch(sunxi_usb_pburn_status)
 	{
 		case SUNXI_USB_PBURN_IDLE:
+
 			if(sunxi_ubuf->rx_ready_for_data == 1)
 			{
 				sunxi_usb_pburn_status = SUNXI_USB_PBURN_SETUP;
@@ -1189,17 +1310,127 @@ static int sunxi_pburn_state_loop(void  *buffer)
 						break;
 	  				}
 
-	  			break;
+	  			case 0xf7:		//自定义命令字，烧录分区数据
+	  				sunxi_usb_dbg("usb burn partition\n");
+	  				sunxi_usb_dbg("usb command = %d\n", cbw->CBWCDB[1]);
+	  				switch (cbw->CBWCDB[1])
+	  				{
+	  					case 0:				//握手
+	  					{
+			  				printf("usb command = %d\n", cbw->CBWCDB[1]);
+	  						__usb_handshake_sec_t  *handshake = (__usb_handshake_sec_t *)trans_data.base_send_buffer;
 
-	  			default:
-	  				sunxi_usb_dbg("not supported command 0x%x now\n", cbw->CBWCDB[0]);
-	  				sunxi_usb_dbg("asked size 0x%x\n", cbw->dCBWDataTransferLength);
+                            memset(handshake, 0, sizeof(__usb_handshake_sec_t));
+							strcpy(handshake->magic, "usb_burn_handshake");
 
-	  				csw.bCSWStatus = 1;
+		  					trans_data.act_send_buffer = (uint)trans_data.base_send_buffer;
+		  					trans_data.send_size = min(cbw->dCBWDataTransferLength, sizeof(__usb_handshake_sec_t));
 
-	  				sunxi_usb_pburn_status = SUNXI_USB_PBURN_STATUS;
+							sunxi_usb_burn_from_boot_setup = 1;
 
-	  				break;
+	  						csw.bCSWStatus = 0;
+	  						sunxi_usb_burn_from_boot_handshake = 1;
+
+	  						sunxi_usb_pburn_status = SUNXI_USB_PBURN_SEND_DATA;
+						}
+						break;
+
+						case 1:				//小机端接收分区数据
+						{
+					        //pburn_flash_start    = *(int *)(cbw->CBWCDB + 4);
+
+							trans_data.recv_size = cbw->dCBWDataTransferLength;
+							trans_data.act_recv_buffer = (uint)trans_data.base_recv_buffer;
+
+							pburn_flash_start += pburn_flash_sectors;
+                            sunxi_usb_pburn_write_enable = 0;
+
+							sunxi_udc_start_recv_by_dma(trans_data.act_recv_buffer, trans_data.recv_size);	//start dma to receive data
+							sunxi_usb_dbg("recv_size=%d\n", trans_data.recv_size);
+							pburn_flash_sectors = (trans_data.recv_size + 511)/512;
+
+					        sunxi_usb_pburn_status = SUNXI_USB_PBURN_RECEIVE_DATA;
+						}
+						break;
+
+						case 2:				//查询结果
+						{
+			  				printf("usb command = %d\n", cbw->CBWCDB[1]);
+							__usb_handshake_ext_t  *handshake = (__usb_handshake_ext_t *)trans_data.base_send_buffer;
+							memset(handshake, 0, sizeof(__usb_handshake_ext_t));
+
+							trans_data.act_send_buffer = (uint)trans_data.base_send_buffer;
+		  					trans_data.send_size = min(cbw->dCBWDataTransferLength, sizeof(__usb_handshake_ext_t));
+
+							if(burn_part_result_state)
+							{
+								strcpy(handshake->magic, "usb_burn_error");
+							}
+							else
+							{
+								strcpy(handshake->magic, "usb_burn_success");
+							}
+							csw.bCSWStatus = 0;
+							handshake->err_no = burn_part_result_state;
+							sunxi_usb_pburn_status = SUNXI_USB_PBURN_SEND_DATA;
+						}
+						break;
+
+						case 3:				//小机端接收分区信息
+						{
+			  				printf("usb command = %d\n", cbw->CBWCDB[1]);
+							trans_data.recv_size = cbw->dCBWDataTransferLength;
+							trans_data.act_recv_buffer = (uint)trans_data.base_recv_buffer;
+
+                            sunxi_usb_pburn_write_enable = 0;
+
+							sunxi_udc_start_recv_by_dma(trans_data.act_recv_buffer, trans_data.recv_size);	//start dma to receive data
+
+							sunxi_usb_dbg("recv_size=%d\n", trans_data.recv_size);
+
+							sunxi_usb_pburn_status = SUNXI_USB_PBURN_RECEIVE_PART_INFO;
+						}
+						break;
+
+						case 4:				//关闭usb
+						{
+			  				printf("usb command = %d\n", cbw->CBWCDB[1]);
+							__usb_handshake_ext_t  *handshake = (__usb_handshake_ext_t *)trans_data.base_send_buffer;
+
+                            memset(handshake, 0, sizeof(__usb_handshake_ext_t));
+							strcpy(handshake->magic, "usb_burn_finish");
+
+							trans_data.act_send_buffer = (uint)trans_data.base_send_buffer;
+		  					trans_data.send_size = min(cbw->dCBWDataTransferLength, sizeof(__usb_handshake_ext_t));
+
+							sunxi_udc_send_data((void *)trans_data.act_send_buffer, trans_data.send_size);
+
+		  					csw.bCSWStatus = 0;
+
+		  					sunxi_usb_pburn_status = SUNXI_USB_PBURN_EXIT;
+
+						}
+						break;
+
+						case 7:             //接收分区校验数据
+						{
+			  				printf("usb command = %d\n", cbw->CBWCDB[1]);
+							trans_data.recv_size = cbw->dCBWDataTransferLength;
+							trans_data.act_recv_buffer = (uint)trans_data.base_recv_buffer;
+
+                            sunxi_usb_pburn_write_enable = 0;
+
+							sunxi_udc_start_recv_by_dma(trans_data.act_recv_buffer, trans_data.recv_size);	//start dma to receive data
+
+                            printf("recv_size=%d\n", trans_data.recv_size);
+
+							sunxi_usb_pburn_status = SUNXI_USB_PBURN_RECEIVE_PART_VERIFY;
+						}
+						break;
+						default:
+							printf("usb command = %d not support\n", cbw->CBWCDB[1]);
+						break;
+	  				}
 	  		}
 
 	  		break;
@@ -1217,9 +1448,7 @@ static int sunxi_pburn_state_loop(void  *buffer)
 	  		break;
 
 	  	case SUNXI_USB_PBURN_RECEIVE_DATA:
-
 	  		sunxi_usb_dbg("SUNXI_USB_RECEIVE_DATA\n");
-
 			if(sunxi_usb_pburn_write_enable == 1)
 			{
 				sunxi_usb_dbg("write flash, start 0x%x, sectors 0x%x\n", pburn_flash_start, trans_data.recv_size/512);
@@ -1238,7 +1467,6 @@ static int sunxi_pburn_state_loop(void  *buffer)
 
   				sunxi_usb_pburn_status = SUNXI_USB_PBURN_STATUS;
 			}
-
 	  		break;
 
 		case SUNXI_USB_PBURN_STATUS:
@@ -1271,15 +1499,54 @@ static int sunxi_pburn_state_loop(void  *buffer)
 	  	case SUNXI_USB_PBURN_RECEIVE_NULL:
 
 	  		sunxi_usb_dbg("SUNXI_USB_PBURN_RECEIVE_NULL\n");
-
 			if(sunxi_usb_pburn_write_enable == 1)
 			{
 				csw.bCSWStatus = 0;
 				sunxi_usb_pburn_write_enable = 0;
   				sunxi_usb_pburn_status = SUNXI_USB_PBURN_STATUS;
 			}
-
 	  		break;
+
+		case SUNXI_USB_PBURN_RECEIVE_PART_INFO:
+			printf("SUNXI_USB_PBURN_RECEIVE_PART_INFO\n");
+			if(sunxi_usb_pburn_write_enable == 1)
+			{
+				//sunxi_dump((u8 *)(trans_data.act_recv_buffer), 1024);
+				burn_part_result_state = burn_part_probe((void*)trans_data.act_recv_buffer);
+				if(!burn_part_result_state)
+				{
+					pburn_flash_start = burn_part_start;
+					pburn_flash_sectors = 0;
+				}
+				csw.bCSWStatus = 0;
+				sunxi_usb_pburn_write_enable = 0;
+  				sunxi_usb_pburn_status = SUNXI_USB_PBURN_STATUS;
+			}
+			break;
+
+		case SUNXI_USB_PBURN_RECEIVE_PART_VERIFY:
+			printf("SUNXI_USB_PBURN_RECEIVE_PART_VERIFY\n");
+			if(sunxi_usb_pburn_write_enable == 1)
+			{
+				//数据校验
+				//sunxi_dump((u8 *)(trans_data.act_recv_buffer), 1024);
+				printf("burn_part_bytes=%lld\n", burn_part_bytes);
+				ret = sunxi_burn_part_verify((void *)trans_data.act_recv_buffer, burn_part_bytes);
+				if(!ret)	//数据校验成功
+				{
+					printf("data verify success\n");
+					burn_part_result_state = ERR_NO_SUCCESS;
+				}
+				else	//数据校验失败
+				{
+					printf("data verify failed\n");
+					burn_part_result_state = ERR_NO_PART_VERIFY_ERR;
+				}
+				csw.bCSWStatus = 0;
+				sunxi_usb_pburn_write_enable = 0;
+  				sunxi_usb_pburn_status = SUNXI_USB_PBURN_STATUS;
+			}
+			break;
 
 	  	default:
 	  		break;

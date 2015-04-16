@@ -238,6 +238,7 @@ LIBS += disk/libdisk.o
 LIBS += drivers/smc/libsmc.o
 endif
 LIBS += net/libnet.o
+LIBS += drivers/efuse/libsunxi_efuse.o
 LIBS += drivers/bios_emulator/libatibiosemu.o
 LIBS += drivers/block/libblock.o
 LIBS += drivers/dma/libdma.o

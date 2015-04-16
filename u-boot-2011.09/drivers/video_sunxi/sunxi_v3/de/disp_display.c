@@ -24,7 +24,7 @@ s32 bsp_disp_init(disp_bsp_init_para * para)
 #if defined(SUPPORT_HDMI)
 	disp_init_hdmi(para);
 #endif
-#if defined(SUPPORT_TV)
+#if defined(SUPPORT_TV) && defined(CONFIG_ARCH_SUN8IW7)
 	disp_init_tv(para);
 #endif
 	disp_init_mgr(para);

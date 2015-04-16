@@ -252,6 +252,8 @@ s32 drv_disp_check_spec(void)
 	return 0;
 }
 
+extern int tv_ac200_init(void);
+
 
 s32 drv_disp_init(void)
 {
@@ -310,6 +312,10 @@ s32 drv_disp_init(void)
 #endif
 #if defined(SUPPORT_TV)
 	tv_init();
+#endif
+
+#if defined(CONFIG_USE_AC200)
+	tv_ac200_init();
 #endif
 
 	bsp_disp_open();
@@ -543,15 +549,14 @@ long disp_ioctl(void *hd, unsigned int cmd, void *arg)
 	case DISP_HDMI_SUPPORT_MODE:
 		ret = bsp_disp_hdmi_check_support_mode(ubuffer[0], ubuffer[1]);
 		break;
-#if defined (CONFIG_ARCH_SUN8IW7)
+
 	case DISP_TV_GET_HPD_STATUS:
-	if(DISPLAY_NORMAL == suspend_status) {
-		ret = bsp_disp_tv_get_hpd_status(ubuffer[0]);
-	}	else {
-		ret = 0;
-	}
-	break;
-#endif
+		if(DISPLAY_NORMAL == suspend_status) {
+			ret = bsp_disp_tv_get_hpd_status(ubuffer[0]);
+		}	else {
+			ret = 0;
+		}
+		break;
 
 #if 0
 	case DISP_CMD_HDMI_SET_SRC:

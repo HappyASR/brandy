@@ -25,6 +25,7 @@
 #include <common.h>
 #include <boot_type.h>
 #include <sunxi_mbr.h>
+#include <malloc.h>
 #include <sys_partition.h>
 #include <securestorage.h>
 
@@ -150,14 +151,47 @@ int save_user_private_data(char *name, char *data)
 }
 
 
+#ifdef CONFIG_SUNXI_SECURE_STORAGE
+static int save_user_data_to_secure_storage(const char * name, char *data)
+{
+	char buffer[512];
+	int  data_len;
+	int  ret;
+
+	printf("Also save user data %s to secure storage\n", (char*)name);
+	if(sunxi_secure_storage_init()){
+		printf("secure storage init fail\n");
+	}else{
+		ret = sunxi_secure_storage_read("key_burned_flag", buffer, 512, &data_len);
+		if(ret)
+		{
+			printf("sunxi secure storage has no flag\n");
+		}
+		else
+		{
+			if(!strcmp(buffer, "key_burned"))
+				return 0;
+		}
+		sunxi_secure_object_write(name, data, strnlen(data, 512));	
+		sunxi_secure_storage_exit();
+	}
+	return 0 ;
+}
+#endif
+
 int do_save_user_data (cmd_tbl_t *cmdtp, int flag, int argc, char * const argv[])
 {
+
 	if (argc < 3) {
 		printf("usage: saveud <name> <data>\n");
 		return 0;
 	}
 	if (argc == 3) {
 		save_user_private_data(argv[1], argv[2]);
+#ifdef CONFIG_SUNXI_SECURE_STORAGE
+		save_user_data_to_secure_storage( argv[1], argv[2]);
+#endif
+
 	}
 
 	return 0;
@@ -168,6 +202,9 @@ U_BOOT_CMD(
 	"save user data",
 	"<name> <data>\n"
 );
+
+
+
 
 /*
 ************************************************************************************************************
@@ -247,6 +284,58 @@ U_BOOT_CMD(
 	"<command>\n"
 );
 
+int erase_private_data(cmd_tbl_t *cmdtp, int flag, int argc, char * const argv[])
+{
+	int count = 0;
+	unsigned int flash_start = 0, flash_sectors = 0;;					//分区的地址偏移量
+	unsigned int part_size;						//分区的大小
+	int i = 0 , len = 1024 * 1024;
+	char *fill_zero = NULL;
+	if(argc > 1)
+	{
+		printf("error: <command>\n");
+		return 0;
+	}
+	part_size = sunxi_partition_get_size_byname(PART_NAME);
+	if (part_size <= 0) {
+		return -1;
+	}
+
+	flash_start = sunxi_partition_get_offset_byname(PART_NAME);
+	count = part_size / 2048;
+
+	fill_zero = (char *)malloc(len);
+	if(fill_zero == NULL)
+	{
+		printf("no enough memory to malloc \n");
+		return -1;
+	}
+
+	memset(fill_zero , 0x0, len);
+	flash_sectors = len / 512;
+	for(i = 0; i < count ; i++)
+	{
+		if(!sunxi_sprite_write(flash_start + i * flash_sectors, flash_sectors, (void *)fill_zero))
+		{
+			printf("sunxi_sprite_erase_private_key err: write flash from 0x%x, sectors 0x%x failed\n", flash_start + i * flash_sectors, flash_sectors);
+			return -1;
+		}
+
+	}
+	if(fill_zero)
+	{
+		free(fill_zero);
+	}
+	printf("erase_private_data success");
+	return 0;
+}
+
+U_BOOT_CMD(
+	erase_userdata,	1,	1,	erase_private_data,
+	"check user data",
+	"<command>\n"
+);
+
 /*
 ************************************************************************************************************
 *
@@ -291,7 +380,7 @@ int update_user_data(void)
 	{	
 		memset(buffer, 0, 512);
 		for (i = 0; i < USER_DATA_NUM; i++) 
-		{	
+		{
 			ret = sunxi_secure_object_read(USER_DATA_NAME[i], buffer, 512, &data_len);
 			if(!ret && data_len < 512) 
 			{
@@ -300,16 +389,14 @@ int update_user_data(void)
 				printf("updataed %s = %s\n", USER_DATA_NAME[i], buffer);					
 				memset(buffer, 0, 512);
 				updata_data_num++;
+				strcpy(USER_DATA_NAME[i], "\0");
 			}
 		}
 	}
-	if (updata_data_num)
-	{
-		return 0;	
-	}
 #endif
-		
+
 	part_size = sunxi_partition_get_size_byname(PART_NAME);
+	printf("check user data form private\n");
 	if (part_size > 0) {
 		part_offset = sunxi_partition_get_offset_byname(PART_NAME);
 		user_data_offset = part_offset + part_size - (USER_DATA_MAXSIZE >> 9);		//获得用户存放数据地址的偏移量
@@ -325,7 +412,7 @@ int update_user_data(void)
 			printf("the user data'magic is bad\n");
 			return 0;
 		}
-	
+
 		if (user_data_head->count > 0) {
 			for (i = 0; i < USER_DATA_NUM; i++) {
 				user_data_p = (USER_PRIVATE_DATA *)(user_data_buffer + sizeof(USER_DATA_HEAR));

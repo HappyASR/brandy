@@ -49,6 +49,7 @@
 static int sbromsw_toc1_traverse(void);
 static int sbromsw_probe_fel_flag(void);
 static int sbromsw_clear_env(void);
+static int sunxi_root_certif_pk_verify(sunxi_certif_info_t *sunxi_certif, u8 *buf, u32 len);
 #ifdef SUNXI_OTA_TEST
 static int sbromsw_print_ota_test(void);
 #endif
@@ -227,6 +228,14 @@ static int sbromsw_toc1_traverse(void)
 
 		return -1;
 	}
+
+	if(sunxi_root_certif_pk_verify(&root_certif, buffer, len))
+	{
+		printf("certif invalid: root certif verify itself failed\n");
+
+		return -1;
+	}
+
 	if(sunxi_certif_verify_itself(&root_certif, buffer, len))
 	{
 		printf("certif invalid: root certif verify itself failed\n");
@@ -406,6 +415,119 @@ static int sbromsw_clear_env(void)
 	gic_exit();
 	reset_pll();
 	mmu_turn_off();
+
+	return 0;
+}
+
+/*
+************************************************************************************************************
+*
+*                                             function
+*
+*    name          :
+*
+*    parmeters     :
+*
+*    return        :
+*
+*    note          :
+*
+*
+************************************************************************************************************
+*/
+#define RSA_BIT_WITDH 2048
+static int sunxi_certif_pubkey_check( sunxi_key_t  *pubkey )
+{
+	char efuse_hash[256] , rotpk_hash[256];
+	char all_zero[32];
+
+	char pk[RSA_BIT_WITDH/8 * 2 + 256]; /*For the stupid sha padding */
+	
+	sid_read_rotpk(efuse_hash);
+	memset(all_zero, 0, 32);
+	if( ! memcmp(all_zero, efuse_hash,32 ) )
+		return 0 ; /*Don't check if rotpk efuse is empty*/
+	else{
+		memset(pk, 0x91, sizeof(pk));
+		char *align = (char *)(((u32)pk+31)&(~31));
+		if( *(pubkey->n) ){
+			memcpy(align, pubkey->n, pubkey->n_len);
+			memcpy(align+pubkey->n_len, pubkey->e, pubkey->e_len);
+		}else{
+			memcpy(align, pubkey->n+1, pubkey->n_len-1);
+			memcpy(align+pubkey->n_len-1, pubkey->e, pubkey->e_len);
+		}
+
+		if(sunxi_sha_calc( rotpk_hash, 32, align, RSA_BIT_WITDH/8*2 ))
+		{
+			printf("sunxi_sha_calc: calc  pubkey sha256 with hardware err\n");
+			return -1;
+		}
+
+		if(memcmp(rotpk_hash, efuse_hash, 32)){
+			printf("certif pk dump\n");
+			ndump(align , RSA_BIT_WITDH/8*2 );
+
+			printf("calc certif pk hash dump\n");
+			ndump(rotpk_hash,32);
+
+			printf("efuse pk dump\n");
+			ndump(efuse_hash,32);
+
+			printf("sunxi_certif_pubkey_check: pubkey hash check err\n");
+			return -1;
+		}
+		return 0 ;
+	}	
+
+}
+/*
+************************************************************************************************************
+*
+*                                             function
+*
+*    name          :
+*
+*    parmeters     :  buf: 证书存放起始   len：数据长度
+*
+*    return        :
+*
+*    note          :  证书自校验
+*
+*
+************************************************************************************************************
+*/
+static int sunxi_root_certif_pk_verify(sunxi_certif_info_t *sunxi_certif, u8 *buf, u32 len)
+{
+	X509 *certif;
+	int  ret;
+
+	//内存初始化
+	sunxi_certif_mem_reset();
+	//创建证书
+	ret = sunxi_certif_create(&certif, buf, len);
+	if(ret < 0)
+	{
+		printf("fail to create a certif\n");
+
+		return -1;
+	}
+	//获取证书公钥
+	ret = sunxi_certif_probe_pubkey(certif, &sunxi_certif->pubkey);
+	if(ret)
+	{
+		printf("fail to probe the public key\n");
+
+		return -1;
+	}
+	ret = sunxi_certif_pubkey_check(&sunxi_certif->pubkey);
+	if(ret){
+		printf("fail to check the public key hash against efuse\n");
+
+		return -1;
+	}
+
+	sunxi_certif_free(certif);
 
 	return 0;
 }
